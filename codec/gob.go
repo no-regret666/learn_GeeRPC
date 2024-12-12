@@ -45,6 +45,8 @@ func (g *GobCodec) Write(header *Header, body interface{}) error {
 	return nil
 }
 
+// 空白标识符_表示我们并不实际使用这个变量，而是用于类型检查
+// 这一行代码用于确保GobCodec类型实现了Codec接口，如果GobCodec没有实现Codec中定义的方法，编译器会在编译时报告错误
 var _ Codec = (*GobCodec)(nil)
 
 func NewGobCodec(conn io.ReadWriteCloser) Codec {
