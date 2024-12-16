@@ -1,14 +1,16 @@
-package main
+package GeeRPC
 
 import (
+	"GeeRPC/codec"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"learn_GeeRPC/codec"
 	"log"
 	"net"
 	"sync"
+	"time"
 )
 
 type Call struct {
@@ -45,7 +47,7 @@ func (c *Client) Close() error {
 		return ErrShutdown
 	}
 	c.closing = true
-	return nil
+	return c.cc.Close()
 }
 
 var _ io.Closer = (*Client)(nil)
@@ -114,17 +116,17 @@ func (c *Client) receive() {
 	c.terminateCalls(err)
 }
 
-func NewClient(conn net.Conn, opt *Option) (*Client, error) {
+func NewClient(conn net.Conn, opt *Option) (client *Client, err error) {
 	f := codec.NewCodecFuncMap[opt.CodecType]
 	if f == nil {
-		err := fmt.Errorf("invalid codec type: %s", opt.CodecType)
+		err = fmt.Errorf("invalid codec type: %s", opt.CodecType)
 		log.Println("rpc client:codec error:", err)
-		return nil, err
+		return
 	}
-	if err := json.NewEncoder(conn).Encode(opt); err != nil {
+	if err = json.NewEncoder(conn).Encode(opt); err != nil {
 		log.Println("rpc client:option error", err)
 		_ = conn.Close()
-		return nil, err
+		return
 	}
 	return newClientCodec(f(conn), opt), nil
 }
@@ -155,21 +157,46 @@ func parseOptions(opts ...*Option) (*Option, error) {
 	return opt, nil
 }
 
-func Dial(network, addr string, opts ...*Option) (client *Client, err error) {
+type newClientFunc func(conn net.Conn, opt *Option) (client *Client, err error)
+
+type clientResult struct {
+	client *Client
+	err    error
+}
+
+func dialTimeout(f newClientFunc, network, addr string, opts ...*Option) (client *Client, err error) {
 	opt, err := parseOptions(opts...)
 	if err != nil {
 		return nil, err
 	}
-	conn, err := net.Dial(network, addr)
+	conn, err := net.DialTimeout(network, addr, opt.ConnectTimeout)
 	if err != nil {
 		return nil, err
 	}
-	defer func(conn net.Conn) {
-		if client == nil {
+	defer func() {
+		if err != nil {
 			_ = conn.Close()
 		}
-	}(conn)
-	return NewClient(conn, opt)
+	}()
+	ch := make(chan clientResult)
+	go func() {
+		client, err := f(conn, opt)
+		ch <- clientResult{client, err}
+	}()
+	if opt.ConnectTimeout == 0 {
+		result := <-ch
+		return result.client, result.err
+	}
+	select {
+	case <-time.After(opt.ConnectTimeout):
+		return nil, fmt.Errorf("rpc client:connect timeout:expect within %s", opt.ConnectTimeout)
+	case result := <-ch:
+		return result.client, result.err
+	}
+}
+
+func Dial(network, addr string, opt ...*Option) (*Client, error) {
+	return dialTimeout(NewClient, network, addr, opt...)
 }
 
 func (c *Client) send(call *Call) {
@@ -184,7 +211,7 @@ func (c *Client) send(call *Call) {
 	c.header.ServiceMethod = call.ServiceMethod
 	c.header.Seq = seq
 	c.header.Error = ""
-	if err := c.cc.Write(&c.header, call); err != nil {
+	if err := c.cc.Write(&c.header, call.Args); err != nil {
 		call := c.removeCall(call.Seq)
 		if call != nil {
 			call.Error = err
@@ -209,7 +236,13 @@ func (c *Client) Go(serviceMethod string, args, reply interface{}, done chan *Ca
 	return call
 }
 
-func (c *Client) Call(serviceMethod string, args interface{}, reply interface{}) error {
-	call := <-c.Go(serviceMethod, args, reply, make(chan *Call, 1)).Done
-	return call.Error
+func (c *Client) Call(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) error {
+	call := c.Go(serviceMethod, args, reply, make(chan *Call, 1))
+	select {
+	case <-ctx.Done():
+		c.removeCall(call.Seq)
+		return errors.New("rpc client:call failed:" + ctx.Err().Error())
+	case call := <-call.Done:
+		return call.Error
+	}
 }

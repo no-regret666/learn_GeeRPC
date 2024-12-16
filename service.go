@@ -1,4 +1,4 @@
-package main
+package GeeRPC
 
 import (
 	"go/ast"
@@ -35,7 +35,6 @@ func (m *methodType) newReply() reflect.Value {
 		reply.Elem().Set(reflect.MakeMap(m.ReplyType.Elem()))
 	case reflect.Slice:
 		reply.Elem().Set(reflect.MakeSlice(m.ReplyType.Elem(), 0, 0))
-	default:
 	}
 	return reply
 }
