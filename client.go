@@ -55,7 +55,7 @@ func (c *Client) Close() error {
 
 var _ io.Closer = (*Client)(nil)
 
-func (c *Client) isAvailable() bool {
+func (c *Client) IsAvailable() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return !c.shutdown && !c.closing
