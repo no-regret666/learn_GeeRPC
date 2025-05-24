@@ -1,4 +1,4 @@
-package learn_GeeRPC
+package geerpc
 
 import (
 	"fmt"
@@ -8,16 +8,14 @@ import (
 
 type Foo int
 
-type Args struct {
-	Num1, Num2 int
-}
+type Args struct{ Num1, Num2 int }
 
 func (f Foo) Sum(args Args, reply *int) error {
 	*reply = args.Num1 + args.Num2
 	return nil
 }
 
-// it's not an exported Method
+// it's not a exported Method
 func (f Foo) sum(args Args, reply *int) error {
 	*reply = args.Num1 + args.Num2
 	return nil
@@ -31,15 +29,15 @@ func _assert(condition bool, msg string, v ...interface{}) {
 
 func TestNewService(t *testing.T) {
 	var foo Foo
-	s := NewService(&foo)
-	_assert(len(s.method) == 1, "wrong service Method,expect 1,but not %d", len(s.method))
+	s := newService(&foo)
+	_assert(len(s.method) == 1, "wrong service Method, expect 1, but got %d", len(s.method))
 	mType := s.method["Sum"]
-	_assert(mType != nil, "wrong Method,Sum shouldn't nil")
+	_assert(mType != nil, "wrong Method, Sum shouldn't nil")
 }
 
 func TestMethodType_Call(t *testing.T) {
 	var foo Foo
-	s := NewService(&foo)
+	s := newService(&foo)
 	mType := s.method["Sum"]
 
 	argv := mType.newArgv()

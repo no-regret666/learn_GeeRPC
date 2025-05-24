@@ -1,4 +1,4 @@
-package learn_GeeRPC
+package geerpc
 
 import (
 	"go/ast"
@@ -11,7 +11,7 @@ type methodType struct {
 	method    reflect.Method
 	ArgType   reflect.Type
 	ReplyType reflect.Type
-	numCalls  uint64 // 统计方法调用次数
+	numCalls  uint64
 }
 
 func (m *methodType) NumCalls() uint64 {
@@ -20,6 +20,7 @@ func (m *methodType) NumCalls() uint64 {
 
 func (m *methodType) newArgv() reflect.Value {
 	var argv reflect.Value
+	// arg may be a pointer type, or a value type
 	if m.ArgType.Kind() == reflect.Ptr {
 		argv = reflect.New(m.ArgType.Elem())
 	} else {
@@ -29,8 +30,9 @@ func (m *methodType) newArgv() reflect.Value {
 }
 
 func (m *methodType) newReplyv() reflect.Value {
+	// reply must be a pointer type
 	replyv := reflect.New(m.ReplyType.Elem())
-	switch m.ReplyType.Kind() {
+	switch m.ReplyType.Elem().Kind() {
 	case reflect.Map:
 		replyv.Elem().Set(reflect.MakeMap(m.ReplyType.Elem()))
 	case reflect.Slice:
@@ -39,15 +41,15 @@ func (m *methodType) newReplyv() reflect.Value {
 	return replyv
 }
 
-type Service struct {
-	name   string                 // 映射的结构体的名称
-	typ    reflect.Type           // 结构体的类型
-	rcvr   reflect.Value          // 结构体的实例本身
-	method map[string]*methodType // 存储映射的结构体的所有符合条件的方法
+type service struct {
+	name   string
+	typ    reflect.Type
+	rcvr   reflect.Value
+	method map[string]*methodType
 }
 
-func NewService(rcvr interface{}) *Service {
-	s := new(Service)
+func newService(rcvr interface{}) *service {
+	s := new(service)
 	s.rcvr = reflect.ValueOf(rcvr)
 	s.name = reflect.Indirect(s.rcvr).Type().Name()
 	s.typ = reflect.TypeOf(rcvr)
@@ -58,7 +60,7 @@ func NewService(rcvr interface{}) *Service {
 	return s
 }
 
-func (s *Service) registerMethods() {
+func (s *service) registerMethods() {
 	s.method = make(map[string]*methodType)
 	for i := 0; i < s.typ.NumMethod(); i++ {
 		method := s.typ.Method(i)
@@ -82,12 +84,7 @@ func (s *Service) registerMethods() {
 	}
 }
 
-func isExportedOrBuiltinType(t reflect.Type) bool {
-	return ast.IsExported(t.Name()) || t.PkgPath() == ""
-	// 未导出的自定义类型 返回false
-}
-
-func (s *Service) call(m *methodType, argv, replyv reflect.Value) error {
+func (s *service) call(m *methodType, argv, replyv reflect.Value) error {
 	atomic.AddUint64(&m.numCalls, 1)
 	f := m.method.Func
 	returnValues := f.Call([]reflect.Value{s.rcvr, argv, replyv})
@@ -95,4 +92,8 @@ func (s *Service) call(m *methodType, argv, replyv reflect.Value) error {
 		return errInter.(error)
 	}
 	return nil
+}
+
+func isExportedOrBuiltinType(t reflect.Type) bool {
+	return ast.IsExported(t.Name()) || t.PkgPath() == ""
 }
